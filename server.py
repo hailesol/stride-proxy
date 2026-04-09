@@ -12,7 +12,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # Allow requests from your STRIDE frontend
+CORS(app, origins="*", allow_headers=["Content-Type"], methods=["GET", "POST", "OPTIONS"])
 
 # API key loaded from Render environment variable — never hardcoded
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
@@ -20,6 +20,10 @@ client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({ "status": "STRIDE proxy is running" })
+
+@app.route("/generate", methods=["OPTIONS"])
+def generate_options():
+    return "", 200
 
 @app.route("/generate", methods=["POST"])
 def generate():
