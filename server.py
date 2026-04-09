@@ -8,32 +8,43 @@ import os
 import json
 import re
 import anthropic
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, origins="*", allow_headers=["Content-Type"], methods=["GET", "POST", "OPTIONS"])
 
-# API key loaded from Render environment variable — never hardcoded
+# Apply CORS globally to all routes
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+# API key loaded from Render environment variable
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"]  = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return response
+
+@app.after_request
+def after_request(response):
+    return add_cors_headers(response)
 
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({ "status": "STRIDE proxy is running" })
 
-@app.route("/generate", methods=["OPTIONS"])
-def generate_options():
-    return "", 200
-
-@app.route("/generate", methods=["POST"])
+@app.route("/generate", methods=["OPTIONS", "POST"])
 def generate():
+    # Handle preflight
+    if request.method == "OPTIONS":
+        return make_response("", 200)
+
     data = request.get_json()
 
     if not data or "prompt" not in data:
         return jsonify({ "error": "Missing prompt field" }), 400
 
     prompt = data["prompt"]
-
     print(f"\n→ Sending to Anthropic Claude...")
 
     try:
@@ -43,14 +54,12 @@ def generate():
             messages=[{ "role": "user", "content": prompt }]
         )
 
-        # Extract text from Anthropic response
         text = next((b.text for b in message.content if b.type == "text"), "")
 
         if not text:
             return jsonify({ "error": "Empty response from Claude" }), 500
 
         print(f"← Claude responded ({len(text)} chars)")
-        print(f"--- First 200 chars ---\n{text[:200]}\n-----------------------")
 
         # Strip markdown fences
         clean = re.sub(r"```json|```", "", text).strip()
@@ -60,12 +69,11 @@ def generate():
             parsed = json.loads(clean)
             workouts = parsed if isinstance(parsed, list) else parsed.get("workouts") or parsed.get("plan")
         except json.JSONDecodeError:
-            # Extract array from within text
             match = re.search(r"\[[\s\S]*\]", clean)
             if not match:
                 print("Could not find JSON array. Full response:")
                 print(text)
-                return jsonify({ "error": "Could not extract workout array from Claude response" }), 500
+                return jsonify({ "error": "Could not extract workout array" }), 500
             workouts = json.loads(match.group())
 
         print(f"✓ Parsed {len(workouts)} workouts successfully")
