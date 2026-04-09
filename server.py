@@ -8,48 +8,36 @@ import os
 import json
 import re
 import anthropic
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
 
-# Apply CORS globally to all routes
-CORS(app, resources={r"/*": {"origins": "*"}})
+# 1. SIMPLE CORS: This is usually enough for Render/GitHub Pages
+CORS(app)
 
 # API key loaded from Render environment variable
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-
-def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"]  = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    return response
-
-@app.after_request
-def after_request(response):
-    return add_cors_headers(response)
 
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({ "status": "STRIDE proxy is running" })
 
-@app.route("/generate", methods=["OPTIONS", "POST"])
+@app.route("/generate", methods=["POST"])
 def generate():
-    # Handle preflight
-    if request.method == "OPTIONS":
-        return make_response("", 200)
-
+    # flask_cors handles OPTIONS automatically, so we only need POST logic here
     data = request.get_json()
 
     if not data or "prompt" not in data:
         return jsonify({ "error": "Missing prompt field" }), 400
 
     prompt = data["prompt"]
-    print(f"\n→ Sending to Anthropic Claude...")
+    print(f"\n→ Sending to Anthropic...")
 
     try:
+        # 2. FIXED MODEL NAME: Changed to 3.5 Sonnet (or use 3-opus-20240229)
         message = client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-3-5-sonnet-20241022",
             max_tokens=8000,
             messages=[{ "role": "user", "content": prompt }]
         )
@@ -64,25 +52,29 @@ def generate():
         # Strip markdown fences
         clean = re.sub(r"```json|```", "", text).strip()
 
-        # Try parsing directly
         try:
             parsed = json.loads(clean)
-            workouts = parsed if isinstance(parsed, list) else parsed.get("workouts") or parsed.get("plan")
+            # Handle different possible JSON structures from the AI
+            if isinstance(parsed, list):
+                workouts = parsed
+            elif "workouts" in parsed:
+                workouts = parsed["workouts"]
+            elif "plan" in parsed:
+                workouts = parsed["plan"]
+            else:
+                workouts = parsed
         except json.JSONDecodeError:
             match = re.search(r"\[[\s\S]*\]", clean)
             if not match:
-                print("Could not find JSON array. Full response:")
-                print(text)
                 return jsonify({ "error": "Could not extract workout array" }), 500
             workouts = json.loads(match.group())
 
-        print(f"✓ Parsed {len(workouts)} workouts successfully")
         return jsonify({ "workouts": workouts })
 
     except Exception as e:
         print(f"Error: {str(e)}")
+        # Return error with 500 status but CORS will still be attached by flask_cors
         return jsonify({ "error": str(e) }), 500
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
