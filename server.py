@@ -37,7 +37,7 @@ def generate():
     try:
         # 2. FIXED MODEL NAME: Changed to 3.5 Sonnet (or use 3-opus-20240229)
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-opus-4-5",
             max_tokens=8000,
             messages=[{ "role": "user", "content": prompt }]
         )
